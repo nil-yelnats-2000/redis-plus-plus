@@ -39,6 +39,12 @@ public:
             Role role = Role::MASTER,
             const EventLoopSPtr &loop = nullptr);
 
+    AsyncRedisCluster(const ConnectionOptions &opts,
+            const ConnectionPoolOptions &pool_opts,
+            Role role,
+            const ClusterOptions &cluster_opts,
+            const EventLoopSPtr &loop = nullptr);
+
     explicit AsyncRedisCluster(const std::string &uri) : AsyncRedisCluster(Uri(uri)) {}
 
     AsyncRedisCluster(const AsyncRedisCluster &) = delete;
@@ -282,6 +288,14 @@ public:
         return mset(il.begin(), il.end());
     }
 
+    template <typename Input, typename Callback>
+    auto mset(Input first, Input last, Callback &&cb)
+        -> typename std::enable_if<IsInvocable<typename std::decay<Callback>::type, Future<void> &&>::value, void>::type {
+        range_check("MSET", first, last);
+
+        _callback_fmt_command<void>(std::forward<Callback>(cb), fmt::mset<Input>, first, last);
+    }
+    
     template <typename Input>
     Future<bool> msetnx(Input first, Input last) {
         range_check("MSETNX", first, last);
@@ -477,6 +491,60 @@ public:
     template <typename T>
     Future<long long> rpush(const StringView &key, std::initializer_list<T> il) {
         return rpush(key, il.begin(), il.end());
+    }
+
+    template <typename Output, typename Input>
+    Future<Optional<std::pair<std::string, Output>>> lmpop(Input first, Input last, ListWhence whence, long long count = 1) {
+        range_check("LMPOP", first, last);
+
+        return _command<Optional<std::pair<std::string, Output>>>(fmt::lmpop<Input>, first, last, whence, count);
+    }
+
+    template <typename Output, typename Input, typename Callback>
+    auto lmpop(Input first, Input last, ListWhence whence, long long count, Callback &&cb)
+        -> typename std::enable_if<IsInvocable<typename std::decay<Callback>::type, Future<Optional<std::pair<std::string, Output>>> &&>::value, void>::type {
+        range_check("LMPOP", first, last);
+
+        _callback_fmt_command<Optional<std::pair<std::string, Output>>>(std::forward<Callback>(cb),
+                fmt::lmpop<Input>, first, last, whence, count);
+    }
+
+    template <typename Output, typename Input, typename Callback>
+    auto lmpop(Input first, Input last, ListWhence whence, Callback &&cb)
+        -> typename std::enable_if<IsInvocable<typename std::decay<Callback>::type, Future<Optional<std::pair<std::string, Output>>> &&>::value, void>::type {
+        return lmpop<Output>(first, last, whence, 1, std::forward<Callback>(cb));
+    }
+
+    Future<OptionalString> lmove(const StringView &src, const StringView &dest,
+            ListWhence src_whence, ListWhence dest_whence) {
+        return _command<OptionalString>(fmt::lmove, src, dest, src_whence, dest_whence);
+    }
+
+    template <typename Callback>
+    void lmove(const StringView &src, const StringView &dest,
+            ListWhence src_whence, ListWhence dest_whence, Callback &&cb) {
+        _callback_fmt_command<OptionalString>(std::forward<Callback>(cb), fmt::lmove, src, dest, src_whence, dest_whence);
+    }
+
+    Future<OptionalString> blmove(const StringView &src, const StringView &dest,
+            ListWhence src_whence, ListWhence dest_whence,
+            const std::chrono::seconds &timeout = std::chrono::seconds{0}) {
+        return _command<OptionalString>(fmt::blmove, src, dest, src_whence, dest_whence, timeout.count());
+    }
+
+    template <typename Callback>
+    void blmove(const StringView &src, const StringView &dest,
+            ListWhence src_whence, ListWhence dest_whence,
+            const std::chrono::seconds &timeout, Callback &&cb) {
+        _callback_fmt_command<OptionalString>(std::forward<Callback>(cb), fmt::blmove, src, dest,
+                src_whence, dest_whence, timeout.count());
+    }
+
+    template <typename Callback>
+    auto blmove(const StringView &src, const StringView &dest,
+            ListWhence src_whence, ListWhence dest_whence, Callback &&cb)
+        -> typename std::enable_if<IsInvocable<typename std::decay<Callback>::type, Future<OptionalString> &&>::value, void>::type {
+        blmove(src, dest, src_whence, dest_whence, std::chrono::seconds{0}, std::forward<Callback>(cb));
     }
 
     // HASH commands.
@@ -1061,6 +1129,54 @@ public:
                 args.begin(), args.end());
     }
 
+    template <typename Result, typename Keys, typename Args>
+    Future<Result> fcall(const StringView &func,
+                Keys keys_first,
+                Keys keys_last,
+                Args args_first,
+                Args args_last) {
+        if (keys_first == keys_last) {
+            throw Error("DO NOT support function without key");
+        }
+
+        return _generic_command<Result>(fmt::fcall<Keys, Args>, *keys_first, func,
+                keys_first, keys_last,
+                args_first, args_last);
+    }
+
+    template <typename Result>
+    Future<Result> fcall(const StringView &func,
+                std::initializer_list<StringView> keys,
+                std::initializer_list<StringView> args) {
+        return fcall<Result>(func,
+                keys.begin(), keys.end(),
+                args.begin(), args.end());
+    }
+
+    template <typename Result, typename Keys, typename Args>
+    Future<Result> fcall_ro(const StringView &func,
+                Keys keys_first,
+                Keys keys_last,
+                Args args_first,
+                Args args_last) {
+        if (keys_first == keys_last) {
+            throw Error("DO NOT support function without key");
+        }
+
+        return _generic_command<Result>(fmt::fcall_ro<Keys, Args>, *keys_first, func,
+                keys_first, keys_last,
+                args_first, args_last);
+    }
+
+    template <typename Result>
+    Future<Result> fcall_ro(const StringView &func,
+                std::initializer_list<StringView> keys,
+                std::initializer_list<StringView> args) {
+        return fcall_ro<Result>(func,
+                keys.begin(), keys.end(),
+                args.begin(), args.end());
+    }
+
     // PUBSUB commands.
 
     Future<long long> publish(const StringView &channel, const StringView &message) {
@@ -1079,6 +1195,51 @@ public:
     template <typename Callback>
     void spublish(const StringView &channel, const StringView &message, Callback &&cb) {
         _callback_fmt_command<long long>(std::forward<Callback>(cb), fmt::spublish, channel, message);
+    }
+
+    // Stream commands.
+
+    template <typename Output>
+    Future<Output> xread(const StringView &key,
+            const StringView &id,
+            long long count) {
+        return _command<Output>(fmt::xread, key, id, count, -1);
+    }
+
+    template <typename Output, typename Callback>
+    auto xread(const StringView &key,
+            const StringView &id,
+            long long count,
+            Callback &&cb)
+        -> typename std::enable_if<IsInvocable<typename std::decay<Callback>::type, Future<Output> &&>::value, void>::type {
+        _callback_fmt_command<Output>(std::forward<Callback>(cb), fmt::xread, key, id, count, -1);
+    }
+
+    template <typename Output, typename Callback>
+    auto xread(const StringView &key,
+            const StringView &id,
+            long long count,
+            const std::chrono::milliseconds& timeout,
+            Callback &&cb)
+        -> typename std::enable_if<IsInvocable<typename std::decay<Callback>::type, Future<Output> &&>::value, void>::type {
+        _callback_fmt_command<Output>(std::forward<Callback>(cb), fmt::xread, key, id, count, timeout.count());
+    }
+
+    template <typename Output, typename Input>
+    auto xread(Input first, Input last, long long count)
+        -> typename std::enable_if<!std::is_convertible<Input, StringView>::value, Future<Output>>::type {
+        range_check("XREAD", first, last);
+
+        return _command<Output>(fmt::xread_range, first, last, count);
+    }
+
+    template <typename Output, typename Input, typename Callback>
+    auto xread(Input first, Input last, long long count, Callback &&cb)
+        -> typename std::enable_if<IsInvocable<typename std::decay<Callback>::type, Future<Output> &&>::value &&
+        !std::is_convertible<Input, StringView>::value, void>::type {
+        range_check("XREAD", first, last);
+
+        _callback_fmt_command<Output>(std::forward<Callback>(cb), fmt::xread_range<Input>, first, last, count);
     }
 
     // co_command* are used internally. DO NOT use them.
@@ -1279,9 +1440,9 @@ private:
                 std::forward<Callback>(cb), formatter, std::forward<Key>(key), std::forward<Args>(args)...);
     }
 
-    AsyncShardsPoolSPtr _pool;
-
     EventLoopSPtr _loop;
+
+    AsyncShardsPoolSPtr _pool;
 };
 
 }

@@ -1,6 +1,17 @@
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.5)
 
-set(REDIS_PLUS_PLUS_VERSION "1.3.11")
+function(GET_VERSION VERSION_PART VERSION_NUM)
+    set(VERSION_REGEX "^const int VERSION_${VERSION_PART} = (.+);$")
+    file(STRINGS "src/sw/redis++/version.h" VERSION_INFO REGEX "${VERSION_REGEX}")
+    string(REGEX REPLACE "${VERSION_REGEX}" "\\1" VERSION_RESULT ${VERSION_INFO})
+    set(${VERSION_NUM} ${VERSION_RESULT} PARENT_SCOPE)
+endfunction()
+
+GET_VERSION("MAJOR" REDIS_PLUS_PLUS_VERSION_MAJOR)
+GET_VERSION("MINOR" REDIS_PLUS_PLUS_VERSION_MINOR)
+GET_VERSION("PATCH" REDIS_PLUS_PLUS_VERSION_PATCH)
+
+set(REDIS_PLUS_PLUS_VERSION "${REDIS_PLUS_PLUS_VERSION_MAJOR}.${REDIS_PLUS_PLUS_VERSION_MINOR}.${REDIS_PLUS_PLUS_VERSION_PATCH}")
 message(STATUS "redis-plus-plus version: ${REDIS_PLUS_PLUS_VERSION}")
 
 project(redis++ LANGUAGES CXX VERSION ${REDIS_PLUS_PLUS_VERSION})
@@ -34,8 +45,11 @@ if(REDIS_PLUS_PLUS_BUILD_ASYNC)
         message(STATUS "redis-plus-plus build async interface with libuv")
 
         # libuv dependency
-        find_path(REDIS_PLUS_PLUS_ASYNC_LIB_HEADER NAMES uv.h)
-        find_library(REDIS_PLUS_PLUS_ASYNC_LIB uv)
+        find_package(libuv)
+        if (NOT libuv_FOUND)
+            find_path(REDIS_PLUS_PLUS_ASYNC_LIB_HEADER NAMES uv.h)
+            find_library(REDIS_PLUS_PLUS_ASYNC_LIB uv)
+        endif()
     else()
         message(FATAL_ERROR "invalid REDIS_PLUS_PLUS_BUILD_ASYNC")
     endif()
@@ -128,50 +142,26 @@ else()
 endif()
 
 # hiredis dependency
-find_package(hiredis QUIET)
-if(hiredis_FOUND)
-    list(APPEND REDIS_PLUS_PLUS_HIREDIS_LIBS hiredis::hiredis)
-
-    if(REDIS_PLUS_PLUS_USE_TLS)
-        find_package(hiredis_ssl REQUIRED)
-        list(APPEND REDIS_PLUS_PLUS_HIREDIS_LIBS hiredis::hiredis_ssl)
-        find_package(OpenSSL REQUIRED)
-        list(APPEND REDIS_PLUS_PLUS_HIREDIS_LIBS ${OPENSSL_LIBRARIES})
-    endif()
-else()
-    find_path(HIREDIS_HEADER hiredis)
-    find_library(HIREDIS_LIB hiredis)
-    list(APPEND REDIS_PLUS_PLUS_HIREDIS_LIBS ${HIREDIS_LIB})
-
-    if(REDIS_PLUS_PLUS_USE_TLS)
-        find_library(HIREDIS_TLS_LIB hiredis_ssl)
-        list(APPEND REDIS_PLUS_PLUS_HIREDIS_LIBS ${HIREDIS_TLS_LIB})
-        find_package(OpenSSL REQUIRED)
-        list(APPEND REDIS_PLUS_PLUS_HIREDIS_LIBS ${OPENSSL_LIBRARIES})
-    endif()
-endif()
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/FindHiredis.cmake)
 
 # Check hiredis features
 message(STATUS "redis-plus-plus check hiredis features")
 if(hiredis_FOUND)
     set(HIREDIS_FEATURE_TEST_INCLUDE ${hiredis_INCLUDE_DIRS})
-    set(HIREDIS_FEATURE_TEST_LIB ${REDIS_PLUS_PLUS_HIREDIS_LIBS})
 else()
     set(HIREDIS_FEATURE_TEST_INCLUDE ${HIREDIS_HEADER})
-    set(HIREDIS_FEATURE_TEST_LIB ${HIREDIS_LIB})
 endif()
 set(HIREDIS_FEATURE_TEST_HEADER "${HIREDIS_FEATURE_TEST_INCLUDE}/hiredis/hiredis.h")
 
-include(CheckSymbolExists)
-set(CMAKE_REQUIRED_LIBRARIES_BACK ${CMAKE_REQUIRED_LIBRARIES})
-set(CMAKE_REQUIRED_LIBRARIES ${HIREDIS_FEATURE_TEST_LIB})
+file(READ "${HIREDIS_FEATURE_TEST_HEADER}" HIREDIS_HEADER_CONTENT)
 
-CHECK_SYMBOL_EXISTS(redisEnableKeepAliveWithInterval ${HIREDIS_FEATURE_TEST_HEADER} REDIS_PLUS_PLUS_HAS_redisEnableKeepAliveWithInterval)
+string(FIND "${HIREDIS_HEADER_CONTENT}" redisEnableKeepAliveWithInterval redisEnableKeepAliveWithInterval_POS)
+if(${redisEnableKeepAliveWithInterval_POS} GREATER -1)
+    set(REDIS_PLUS_PLUS_HAS_redisEnableKeepAliveWithInterval ON)
+endif()
 
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/hiredis_features.h.in ${CMAKE_CURRENT_SOURCE_DIR}/${REDIS_PLUS_PLUS_SOURCE_DIR}/hiredis_features.h)
-
-# Restore CMAKE_REQUIRED_LIBRARIES
-set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES_BACK})
+set(REDIS_PLUS_PLUS_GENERATED_HEADER_DIR ${CMAKE_CURRENT_BINARY_DIR}/${REDIS_PLUS_PLUS_HEADER_DIR})
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/hiredis_features.h.in ${CMAKE_CURRENT_BINARY_DIR}/${REDIS_PLUS_PLUS_SOURCE_DIR}/hiredis_features.h)
 
 # Build static library
 option(REDIS_PLUS_PLUS_BUILD_STATIC "Build static library" ON)
@@ -203,7 +193,8 @@ if(REDIS_PLUS_PLUS_BUILD_STATIC)
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/${REDIS_PLUS_PLUS_HEADER_DIR}>
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/${TLS_SUB_DIR}>
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/${CXX_UTILS_DIR}>
-            $<INSTALL_INTERFACE:include>)
+            $<INSTALL_INTERFACE:include>
+            $<BUILD_INTERFACE:${REDIS_PLUS_PLUS_GENERATED_HEADER_DIR}>)
 
     if(hiredis_FOUND)
         target_include_directories(${STATIC_LIB} PUBLIC $<BUILD_INTERFACE:${hiredis_INCLUDE_DIRS}>)
@@ -214,7 +205,17 @@ if(REDIS_PLUS_PLUS_BUILD_STATIC)
 
     if(REDIS_PLUS_PLUS_BUILD_ASYNC)
         target_include_directories(${STATIC_LIB} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/${REDIS_PLUS_PLUS_ASYNC_FUTURE_HEADER}>)
-        target_include_directories(${STATIC_LIB} PUBLIC $<BUILD_INTERFACE:${REDIS_PLUS_PLUS_ASYNC_LIB_HEADER}>)
+        if(libuv_FOUND)
+            target_link_libraries(${STATIC_LIB} PUBLIC 
+                $<IF:$<TARGET_EXISTS:libuv::uv>, libuv::uv, 
+                    $<IF:$<TARGET_EXISTS:libuv::uv_a>, libuv::uv_a, 
+                        $<IF:$<TARGET_EXISTS:uv>, uv, uv_a>
+                    >
+                >
+            )
+        else()
+            target_include_directories(${STATIC_LIB} PUBLIC $<BUILD_INTERFACE:${REDIS_PLUS_PLUS_ASYNC_LIB_HEADER}>)
+        endif()
         if(REDIS_PLUS_PLUS_ASYNC_FUTURE STREQUAL "boost")
             target_include_directories(${STATIC_LIB} SYSTEM PUBLIC $<BUILD_INTERFACE:${Boost_INCLUDE_DIR}>)
         endif()
@@ -255,20 +256,30 @@ if(REDIS_PLUS_PLUS_BUILD_SHARED)
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/${REDIS_PLUS_PLUS_HEADER_DIR}>
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/${TLS_SUB_DIR}>
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/${CXX_UTILS_DIR}>
-            $<INSTALL_INTERFACE:include>)
+            $<INSTALL_INTERFACE:include>
+            $<BUILD_INTERFACE:${REDIS_PLUS_PLUS_GENERATED_HEADER_DIR}>)
 
     if(hiredis_FOUND)
         target_include_directories(${SHARED_LIB} PUBLIC $<BUILD_INTERFACE:${hiredis_INCLUDE_DIRS}>)
-        target_link_libraries(${SHARED_LIB} PUBLIC ${REDIS_PLUS_PLUS_HIREDIS_LIBS})
     else()
         target_include_directories(${SHARED_LIB} PUBLIC $<BUILD_INTERFACE:${HIREDIS_HEADER}>)
-        target_link_libraries(${SHARED_LIB} PUBLIC ${REDIS_PLUS_PLUS_HIREDIS_LIBS})
     endif()
+    target_link_libraries(${SHARED_LIB} PUBLIC ${REDIS_PLUS_PLUS_HIREDIS_LIBS})
 
     if(REDIS_PLUS_PLUS_BUILD_ASYNC)
         target_include_directories(${SHARED_LIB} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/${REDIS_PLUS_PLUS_ASYNC_FUTURE_HEADER}>)
-        target_include_directories(${SHARED_LIB} PUBLIC $<BUILD_INTERFACE:${REDIS_PLUS_PLUS_ASYNC_LIB_HEADER}>)
-        target_link_libraries(${SHARED_LIB} PUBLIC ${REDIS_PLUS_PLUS_ASYNC_LIB})
+        if(libuv_FOUND)
+            target_link_libraries(${SHARED_LIB} PUBLIC 
+                $<IF:$<TARGET_EXISTS:libuv::uv>, libuv::uv, 
+                    $<IF:$<TARGET_EXISTS:libuv::uv_a>, libuv::uv_a, 
+                        $<IF:$<TARGET_EXISTS:uv>, uv, uv_a>
+                    >
+                >
+            )
+        else()
+            target_include_directories(${SHARED_LIB} PUBLIC $<BUILD_INTERFACE:${REDIS_PLUS_PLUS_ASYNC_LIB_HEADER}>)
+            target_link_libraries(${SHARED_LIB} PUBLIC ${REDIS_PLUS_PLUS_ASYNC_LIB})
+        endif()
         if(REDIS_PLUS_PLUS_ASYNC_FUTURE STREQUAL "boost")
             target_include_directories(${SHARED_LIB} SYSTEM PUBLIC $<BUILD_INTERFACE:${Boost_INCLUDE_DIR}>)
         endif()
@@ -319,7 +330,13 @@ install(EXPORT redis++-targets
 
 # Install headers.
 set(HEADER_PATH "sw/redis++")
-file(GLOB HEADERS "${REDIS_PLUS_PLUS_SOURCE_DIR}/*.h*" "${TLS_SUB_DIR}/sw/redis++/*.h" "${CXX_UTILS_DIR}/sw/redis++/*.h" "${REDIS_PLUS_PLUS_ASYNC_FUTURE_HEADER}/sw/redis++/*.h")
+file(GLOB HEADERS
+    "${REDIS_PLUS_PLUS_SOURCE_DIR}/*.h*"
+    "${TLS_SUB_DIR}/sw/redis++/*.h"
+    "${CXX_UTILS_DIR}/sw/redis++/*.h"
+    "${REDIS_PLUS_PLUS_ASYNC_FUTURE_HEADER}/sw/redis++/*.h"
+    "${REDIS_PLUS_PLUS_GENERATED_HEADER_DIR}/sw/redis++/*.h")
+
 if(NOT REDIS_PLUS_PLUS_BUILD_ASYNC)
     file(GLOB ASYNC_HEADERS "${REDIS_PLUS_PLUS_SOURCE_DIR}/async_*.h" "${REDIS_PLUS_PLUS_SOURCE_DIR}/event_*.h")
     list(REMOVE_ITEM HEADERS ${ASYNC_HEADERS})

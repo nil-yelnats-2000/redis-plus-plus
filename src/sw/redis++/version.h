@@ -1,5 +1,5 @@
 /**************************************************************************
-   Copyright (c) 2017 sewenew
+   Copyright (c) 2024 sewenew
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -14,46 +14,19 @@
    limitations under the License.
  *************************************************************************/
 
-#ifndef SEWENEW_REDISPLUSPLUS_TEST_STRING_CMDS_TEST_H
-#define SEWENEW_REDISPLUSPLUS_TEST_STRING_CMDS_TEST_H
-
-#include <sw/redis++/redis++.h>
+#ifndef SEWENEW_REDISPLUSPLUS_VERSION_H
+#define SEWENEW_REDISPLUSPLUS_VERSION_H
 
 namespace sw {
 
 namespace redis {
 
-namespace test {
-
-template <typename RedisInstance>
-class StringCmdTest {
-public:
-    explicit StringCmdTest(RedisInstance &instance) : _redis(instance) {}
-
-    void run();
-
-private:
-    void _test_str();
-
-    void _test_bit();
-
-    void _test_numeric();
-
-    void _test_getset();
-
-    void _test_set_with_get_option();
-
-    void _test_mgetset();
-
-    RedisInstance &_redis;
-};
+const int VERSION_MAJOR = 1;
+const int VERSION_MINOR = 3;
+const int VERSION_PATCH = 15;
 
 }
 
 }
 
-}
-
-#include "string_cmds_test.hpp"
-
-#endif // end SEWENEW_REDISPLUSPLUS_TEST_STRING_CMDS_TEST_H
+#endif // end SEWENEW_REDISPLUSPLUS_VERSION_H
