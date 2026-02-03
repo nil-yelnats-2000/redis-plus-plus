@@ -1,0 +1,30 @@
+Determining if the redisEnableKeepAliveWithInterval exist failed with the following output:
+Change Dir: /home/pi/redis-plus-plus/build/CMakeFiles/CMakeScratch/TryCompile-wXKWYz
+
+Run Build Command(s):/usr/bin/gmake -f Makefile cmTC_ea099/fast && /usr/bin/gmake  -f CMakeFiles/cmTC_ea099.dir/build.make CMakeFiles/cmTC_ea099.dir/build
+gmake[1]: Entering directory '/home/pi/redis-plus-plus/build/CMakeFiles/CMakeScratch/TryCompile-wXKWYz'
+Building CXX object CMakeFiles/cmTC_ea099.dir/CheckSymbolExists.cxx.o
+/usr/bin/c++   -std=c++17  -o CMakeFiles/cmTC_ea099.dir/CheckSymbolExists.cxx.o -c /home/pi/redis-plus-plus/build/CMakeFiles/CMakeScratch/TryCompile-wXKWYz/CheckSymbolExists.cxx
+/home/pi/redis-plus-plus/build/CMakeFiles/CMakeScratch/TryCompile-wXKWYz/CheckSymbolExists.cxx: In function ‘int main(int, char**)’:
+/home/pi/redis-plus-plus/build/CMakeFiles/CMakeScratch/TryCompile-wXKWYz/CheckSymbolExists.cxx:8:19: error: ‘redisEnableKeepAliveWithInterval’ was not declared in this scope
+    8 |   return ((int*)(&redisEnableKeepAliveWithInterval))[argc];
+      |                   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+gmake[1]: *** [CMakeFiles/cmTC_ea099.dir/build.make:78: CMakeFiles/cmTC_ea099.dir/CheckSymbolExists.cxx.o] Error 1
+gmake[1]: Leaving directory '/home/pi/redis-plus-plus/build/CMakeFiles/CMakeScratch/TryCompile-wXKWYz'
+gmake: *** [Makefile:127: cmTC_ea099/fast] Error 2
+
+
+File CheckSymbolExists.cxx:
+/* */
+#include </usr/include/hiredis/hiredis.h>
+
+int main(int argc, char** argv)
+{
+  (void)argv;
+#ifndef redisEnableKeepAliveWithInterval
+  return ((int*)(&redisEnableKeepAliveWithInterval))[argc];
+#else
+  (void)argc;
+  return 0;
+#endif
+}
